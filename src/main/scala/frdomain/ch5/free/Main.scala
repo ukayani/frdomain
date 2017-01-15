@@ -18,6 +18,7 @@ object Main {
       } yield a
 
     val t = AccountRepoMutableInterpreter().apply(composite)
+    val r = AccountRepoStateInterpreter().apply(composite)(Map.empty[String, Account])
   }
 
   object app2 {

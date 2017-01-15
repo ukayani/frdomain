@@ -7,15 +7,15 @@ import Scalaz._
 import scalaz.concurrent.Task
 import Task.{now, fail}
 
-trait AccountRepoInterpreter {
-  def apply[A](action: AccountRepo[A]): Task[A]
+trait AccountRepoInterpreter[M[_]] {
+  def apply[A](action: AccountRepo[A]): M[A]
 }
   
 /**
  * Basic interpreter that uses a global mutable Map to store the state
  * of computation
  */
-case class AccountRepoMutableInterpreter() extends AccountRepoInterpreter {
+case class AccountRepoMutableInterpreter() extends AccountRepoInterpreter[Task] {
   val table: MMap[String, Account] = MMap.empty[String, Account]
 
   val step: AccountRepoF ~> Task = new (AccountRepoF ~> Task) {
@@ -50,4 +50,32 @@ case class AccountRepoShowInterpreter() {
   def interpret[A](script: AccountRepo[A], ls: List[String]): List[String] =
     script.foldMap(step).exec(ls)
 
+}
+
+object AccountRepoState {
+  type AccountMap = Map[String, Account]
+  type Err[A] = Error \/ A
+  type AccountState[A] = StateT[Err, AccountMap, A]
+}
+
+import AccountRepoState._
+import StateT._
+
+case class AccountRepoStateInterpreter() extends AccountRepoInterpreter[AccountState] {
+
+  val step: AccountRepoF ~> AccountState = new (AccountRepoF ~> AccountState) {
+    override def apply[A](fa: AccountRepoF[A]): AccountState[A] = fa match {
+      case Query(no) => StateT[Err, AccountMap, A]((s: AccountMap) => {
+        s.get(no).map(a => (s, a).right[Error]).getOrElse((new Error(s"Account no $no not found")).left[(AccountMap, A)])
+      })
+      case Store(account) => StateT[Err, AccountMap, A]((s: AccountMap) => {
+        (s + (account.no -> account), ()).right[Error]
+      })
+      case Delete(no) => StateT[Err, AccountMap, A]((s: AccountMap) => {
+        (s - no, ()).right[Error]
+      })
+    }
+  }
+
+  def apply[A](action: AccountRepo[A]): AccountState[A] = action.foldMap(step)
 }
